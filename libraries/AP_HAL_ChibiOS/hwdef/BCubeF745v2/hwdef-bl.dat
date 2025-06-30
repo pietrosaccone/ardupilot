@@ -1,5 +1,5 @@
 # hw definition file for processing by chibios_pins.py
-# for Holybro KakuteF7 bootloader
+# for B-CUBE F745 v2
 
 # MCU class and specific type
 MCU STM32F7xx STM32F745xx
