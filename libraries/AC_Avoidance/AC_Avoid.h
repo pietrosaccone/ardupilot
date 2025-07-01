@@ -71,9 +71,9 @@ public:
     void adjust_velocity_z(float kP, float accel_cmss, float& climb_rate_cms, float dt);
 
     // adjust roll-pitch to push vehicle away from objects
-    // roll and pitch value are in centi-degrees
-    // angle_max is the user defined maximum lean angle for the vehicle in centi-degrees
-    void adjust_roll_pitch(float &roll_cd, float &pitch_cd, float angle_max_cd);
+    // roll and pitch value are in radians
+    // veh_angle_max_rad is the user defined maximum lean angle for the vehicle in radians
+    void adjust_roll_pitch_rad(float &roll_rad, float &pitch_rad, float veh_angle_max_rad);
 
     // enable/disable proximity based avoidance
     void proximity_avoidance_enable(bool on_off) { _proximity_enabled = on_off; }
@@ -204,7 +204,7 @@ private:
 
     // parameters
     AP_Int8 _enabled;
-    AP_Int16 _angle_max;           // maximum lean angle to avoid obstacles (only used in non-GPS flight modes)
+    AP_Int16 _angle_max_cd;        // maximum lean angle to avoid obstacles (only used in non-GPS flight modes)
     AP_Float _dist_max;            // distance (in meters) from object at which obstacle avoidance will begin in non-GPS modes
     AP_Float _margin;              // vehicle will attempt to stay this distance (in meters) from objects while in GPS modes
     AP_Int8 _behavior;             // avoidance behaviour (slide or stop)
