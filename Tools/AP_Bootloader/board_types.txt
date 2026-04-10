@@ -327,13 +327,8 @@ AP_HW_ESP32S3_PERIPH                 1206
 AP_HW_NUCLEO_H753ZI                  1207
 AP_HW_DAKEFPVH743_SLIM               1208
 AP_HW_AIRBRAIN_H743                  1209
-<<<<<<< HEAD
 AP_HW_Morakot                        1210
 AP_HW_CORVON_V5                      1211
-=======
-AP_HW_BCUBEF745V2                    1210
-
->>>>>>> a373d539167107545f09e261a7e64b3a8c4affe5
 
 AP_HW_CSKY_PMU                       1212
 AP_HW_PilotGaeaSH7V1                 1213
