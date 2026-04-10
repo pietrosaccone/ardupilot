@@ -83,8 +83,8 @@ bool AP_Arming_Rover::pre_arm_checks(bool report)
         return false;
     }
 
-    //are arming checks disabled?
-    if (checks_to_perform == 0) {
+    // are arming checks disabled?
+    if (should_skip_all_checks()) {
         return mandatory_checks(report);
     }
 
@@ -107,8 +107,16 @@ bool AP_Arming_Rover::pre_arm_checks(bool report)
 
 bool AP_Arming_Rover::arm_checks(AP_Arming::Method method)
 {
-    //are arming checks disabled?
-    if (checks_to_perform == 0) {
+    if (method == AP_Arming::Method::RUDDER) {
+        // check if arming/disarming allowed from this mode
+        if (!rover.control_mode->allows_arming_from_transmitter()) {
+            check_failed(true, "Mode not rudder-armable");
+            return false;
+        }
+    }
+
+    // are arming checks disabled?
+    if (should_skip_all_checks()) {
         return true;
     }
     return AP_Arming::arm_checks(method);
@@ -118,9 +126,6 @@ void AP_Arming_Rover::update_soft_armed()
 {
     hal.util->set_soft_armed(is_armed() &&
                              hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED);
-#if HAL_LOGGING_ENABLED
-    AP::logger().set_vehicle_armed(hal.util->get_soft_armed());
-#endif
 }
 
 /*
@@ -142,6 +147,11 @@ bool AP_Arming_Rover::arm(AP_Arming::Method method, const bool do_arming_checks)
     // save home heading for use in sail vehicles
     rover.g2.windvane.record_home_heading();
 
+#if HAL_LOGGING_ENABLED
+    // Tell logger it can start logging
+    AP::logger().set_vehicle_armed(true);
+#endif
+
     update_soft_armed();
 
     send_arm_disarm_statustext("Throttle armed");
@@ -154,6 +164,14 @@ bool AP_Arming_Rover::arm(AP_Arming::Method method, const bool do_arming_checks)
  */
 bool AP_Arming_Rover::disarm(const AP_Arming::Method method, bool do_disarm_checks)
 {
+    if (method == AP_Arming::Method::RUDDER) {
+        if (rover.g2.motors.active()) {
+            // can't emit a message here as full-rudder while driving
+            // is not uncommon
+            return false;
+        }
+    }
+
     if (!AP_Arming::disarm(method, do_disarm_checks)) {
         return false;
     }
@@ -161,6 +179,11 @@ bool AP_Arming_Rover::disarm(const AP_Arming::Method method, bool do_disarm_chec
         // reset the mission on disarm if we are not in auto
         rover.mode_auto.mission.reset();
     }
+
+#if HAL_LOGGING_ENABLED
+    // Tell logger it can stop logging
+    AP::logger().set_vehicle_armed(false);
+#endif
 
     update_soft_armed();
 

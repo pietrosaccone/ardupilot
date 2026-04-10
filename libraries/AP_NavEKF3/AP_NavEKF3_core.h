@@ -260,6 +260,13 @@ public:
    // return the innovation consistency test ratios for the velocity, position, magnetometer and true airspeed measurements
     bool getVariances(float &velVar, float &posVar, float &hgtVar, Vector3f &magVar, float &tasVar, Vector2f &offset) const;
 
+    // return 1-sigma position and velocity uncertainty derived from the EKF state error covariance matrix P
+    // pos_horiz_m: 2D RMS horizontal position uncertainty (m)
+    // pos_vert_m:  1-sigma vertical position uncertainty (m)
+    // vel_m_s:     1-sigma worst-case NED velocity uncertainty (m/s)
+    // returns false if EKF is not yet initialised
+    bool getPosVelUncertainty(float &pos_horiz_m, float &pos_vert_m, float &vel_m_s) const;
+
     // get a particular source's velocity innovations
     // returns true on success and results are placed in innovations and variances arguments
     bool getVelInnovationsAndVariancesForSource(AP_NavEKF_Source::SourceXY source, Vector3f &innovations, Vector3f &variances) const WARN_IF_UNUSED;
@@ -353,6 +360,14 @@ public:
     */
     void writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms);
 
+    /*
+     * Write terrain altitude (derived from SRTM) in meters above the origin
+     * only used by optical flow when out of rangefinder range
+     */
+#if EK3_FEATURE_OPTFLOW_SRTM
+    void writeTerrainData(float alt_m);
+#endif
+
     // Set to true if the terrain underneath is stable enough to be used as a height reference
     // in combination with a range finder. Set to false if the terrain underneath the vehicle
     // cannot be used as a height reference. Use to prevent range finder operation otherwise
@@ -422,9 +437,10 @@ public:
         WHEN_MANOEUVRING = 1,
         NEVER = 2,
         AFTER_FIRST_CLIMB = 3,
-        ALWAYS = 4
+        ALWAYS = 4,
         // 5 was EXTERNAL_YAW (do not use)
         // 6 was EXTERNAL_YAW_FALLBACK (do not use)
+        GROUND_AND_INFLIGHT = 7,
     };
 
     // magnetometer fusion selections
@@ -439,6 +455,9 @@ public:
 
     // are we using (aka fusing) external nav for yaw?
     bool using_extnav_for_yaw() const;
+
+    // are we using a gps?
+    bool using_gps() const;
 
     // Writes the default equivalent airspeed and 1-sigma uncertainty in m/s to be used in forward flight if a measured airspeed is required and not available.
     void writeDefaultAirSpeed(float airspeed, float uncertainty);
@@ -1097,6 +1116,7 @@ private:
     bool inFlight;                  // true when the vehicle is definitely flying
     bool prevInFlight;              // value inFlight from previous frame - used to detect transition
     bool manoeuvring;               // boolean true when the flight vehicle is performing horizontal changes in velocity
+    bool fusingStationaryZeroVel;   // true when fusing synthetic zero velocity while stationary on ground
     Vector6 innovVelPos;            // innovation output for a group of measurements
     Vector6 varInnovVelPos;         // innovation variance output for a group of measurements
     Vector6 velPosObs;              // observations for combined velocity and positon group of measurements (3x1 m , 3x1 m/s)
@@ -1296,6 +1316,13 @@ private:
         Vector2f bodyRate;          // latest corrected optical flow body rate (used for calibration)
         Vector2f losPred;           // EKF estimated component of flowRate that comes from vehicle movement (not rotation)
     } flowCalSample;
+
+#if EK3_FEATURE_OPTFLOW_SRTM
+    // terrain altitude from SRTM (only used for optical flow when rangefinder is out-of-range)
+    ftype terrain_srtm_alt;        // terrain (from SRTM) altitude above the EKF origin (m)
+    uint32_t terrain_srtm_alt_ms;  // system time when the SRTM terrain altitude was last updated (msec)
+    bool terrain_srtm_alt_valid;   // true when the SRTM terrain altitude is valid (e.g. has been received within 5 seconds)
+#endif
 
     ftype hgtMea;                   // height measurement derived from either baro, gps or range finder data (m)
     bool inhibitGndState;           // true when the terrain position state is to remain constant

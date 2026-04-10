@@ -86,7 +86,6 @@ void SITL_State::_usage(void)
            "\t--rate|-r RATE           set SITL framerate\n"
            "\t--console|-C             use console instead of TCP ports\n"
            "\t--instance|-I N          set instance of SITL (adds 10*instance to all port numbers)\n"
-           // "\t--param|-P NAME=VALUE    set some param\n"  CURRENTLY BROKEN!
            "\t--synthetic-clock|-S     set synthetic clock mode\n"
            "\t--home|-O HOME           set start location (lat,lng,alt,yaw) or location name\n"
            "\t--model|-M MODEL         set simulation model\n"
@@ -322,7 +321,6 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         {"rate",            true,   0, 'r'},
         {"console",         false,  0, 'C'},
         {"instance",        true,   0, 'I'},
-        {"param",           true,   0, 'P'},
         {"synthetic-clock", false,  0, 'S'},
         {"home",            true,   0, 'O'},
         {"model",           true,   0, 'M'},
@@ -444,9 +442,6 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
             }
         }
         break;
-        case 'P':
-            _set_param_default(gopt.optarg);
-            break;
         case 'S':
             printf("Ignoring stale command-line parameter '-S'");
             break;
@@ -587,6 +582,10 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         // scrolled off the screen:
         printf("You must specify a vehicle model.\n");
         exit(1);
+    }
+
+    if (AP::sitl() != nullptr) {  // some examples don't instantiate this object
+        AP::sitl()->init();
     }
 
     for (uint8_t i=0; i < ARRAY_SIZE(model_constructors); i++) {

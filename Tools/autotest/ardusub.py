@@ -8,17 +8,15 @@ AP_FLAKE8_CLEAN
 '''
 
 import os
-import sys
 
-from pymavlink import mavutil, mavextra
-
-import vehicle_test_suite
-from vehicle_test_suite import NotAchievedException
-from vehicle_test_suite import AutoTestTimeoutException
 from math import degrees
 
-if sys.version_info[0] < 3:
-    ConnectionResetError = AutoTestTimeoutException
+from pymavlink import mavextra
+from pymavlink import mavutil
+
+import vehicle_test_suite
+
+from vehicle_test_suite import NotAchievedException
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -93,6 +91,45 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
 
     def default_frame(self):
         return 'vectored'
+
+    def WaterDepth(self):
+        """Check WATER_DEPTH MAVLink message support for ArduSub"""
+
+        self.context_push()
+
+        # Setup rangefinders
+        self.customise_SITL_commandline([
+            "--serial7=sim:nmea", # NMEA Rangefinder
+        ])
+
+        self.set_parameters({
+            "RNGFND1_TYPE" : 17,     # NMEA must attach uart to SITL
+            "RNGFND1_ORIENT" : 25,   # Set to downward facing
+            "RNGFND1_MIN": 0.10,
+            "RNGFND1_MAX": 30.00,
+            "SERIAL7_PROTOCOL" : 9,  # Rangefinder on serial7
+            "SERIAL7_BAUD" : 9600,   # Rangefinder specific baudrate
+        })
+
+        self.reboot_sitl()
+        self.set_rc_default()
+        self.wait_ready_to_arm()
+
+        self.set_message_rate_hz('WATER_DEPTH', 2)
+
+        self.progress("Arming vehicle for WATER_DEPTH test")
+        self.arm_vehicle()
+
+        # wait for at least one WATER_DEPTH message
+        self.progress("Waiting for WATER_DEPTH message")
+        self.assert_receive_message('WATER_DEPTH', timeout=20)
+
+        # assert the message rate is correct
+        self.progress("Checking WATER_DEPTH message rate")
+        self.assert_message_rate_hz('WATER_DEPTH', 2)
+
+        self.disarm_vehicle()
+        self.context_pop()
 
     def is_sub(self):
         return True
@@ -184,56 +221,50 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
 
     def RngfndQuality(self):
         """Check lua Range Finder quality information flow"""
-        self.context_push()
         self.context_collect('STATUSTEXT')
 
-        ex = None
-        try:
-            self.set_parameters({
-                "SCR_ENABLE": 1,
-                "RNGFND1_TYPE": 36,
-                "RNGFND1_ORIENT": 25,
-                "RNGFND1_MIN": 0.10,
-                "RNGFND1_MAX": 50.00,
-            })
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "RNGFND1_TYPE": 36,
+            "RNGFND1_ORIENT": 25,
+            "RNGFND1_MIN": 0.10,
+            "RNGFND1_MAX": 50.00,
+        })
 
-            self.install_example_script_context("rangefinder_quality_test.lua")
+        self.install_example_script_context("rangefinder_quality_test.lua")
 
-            # These string must match those sent by the lua test script.
-            complete_str = "#complete#"
-            failure_str = "!!failure!!"
+        # These string must match those sent by the lua test script.
+        complete_str = "#complete#"
+        failure_str = "!!failure!!"
 
-            self.reboot_sitl()
-
-            self.wait_statustext(complete_str, timeout=20, check_context=True)
-            found_failure = self.statustext_in_collections(failure_str)
-
-            if found_failure is not None:
-                raise NotAchievedException("RngfndQuality test failed: " + found_failure.text)
-
-        except Exception as e:
-            self.print_exception_caught(e)
-            ex = e
-
-        self.context_pop()
-
-        # restart SITL RF driver
         self.reboot_sitl()
 
-        if ex:
-            raise ex
+        self.wait_statustext(complete_str, timeout=20, check_context=True)
+        found_failure = self.statustext_in_collections(failure_str)
+
+        if found_failure is not None:
+            raise NotAchievedException("RngfndQuality test failed: " + found_failure.text)
 
     def watch_distance_maintained(self, delta=0.3, timeout=5.0):
         """Watch and wait for the rangefinder reading to be maintained"""
         tstart = self.get_sim_time_cached()
+        self.context_push()
+        self.context_set_message_rate_hz('RANGEFINDER', self.sitl_streamrate())
         previous_distance = self.assert_receive_message('RANGEFINDER').distance
+        previous_distance_ds = self.assert_receive_message('DISTANCE_SENSOR').current_distance * 0.01  # cm -> m
         self.progress('Distance to be watched: %.2f' % previous_distance)
         while True:
             if self.get_sim_time_cached() - tstart > timeout:
                 self.progress('Distance hold done: %f' % previous_distance)
+                self.context_pop()
                 return
             m = self.assert_receive_message('RANGEFINDER')
             if abs(m.distance - previous_distance) > delta:
+                raise NotAchievedException(
+                    "Distance not maintained: want %.2f (+/- %.2f) got=%.2f" %
+                    (previous_distance, delta, m.distance))
+            m = self.assert_receive_message('DISTANCE_SENSOR')
+            if abs(m.current_distance*0.01 - previous_distance_ds) > delta:
                 raise NotAchievedException(
                     "Distance not maintained: want %.2f (+/- %.2f) got=%.2f" %
                     (previous_distance, delta, m.distance))
@@ -750,9 +781,8 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.disarm_vehicle()
 
     def GPSForYaw(self):
-        '''Consume heading of NMEA GPS and propagate to ATTITUDE'''
+        '''Test consumption of heading from NMEA GPS and its propagation to ATTITUDE'''
 
-        # load parameters with gps for yaw and 10 degrees offset
         self.load_default_params_file("sub-gps-for-yaw-nmea.parm")
         self.reboot_sitl()
         # wait for the vehicle to be ready
@@ -774,6 +804,44 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
             raise NotAchievedException(
                 "Expected to get yaw consumed and at ATTITUDE (want %f got %f)" % (expected_yaw_deg, achieved_yaw_deg)
             ) from e
+
+    def VisoForYaw(self):
+        ''' Test propagation of yaw from VisualOdom to EKF'''
+        yaw_offset_deg = 50
+        # Configure SITL to use Vicon
+        self.customise_SITL_commandline(["--serial5=sim:vicon:"])
+
+        # Configure EKF to use Vicon for yaw
+        self.set_parameters({
+            "VISO_TYPE": 1, # Vicon
+            "SERIAL5_PROTOCOL": 1,
+            "SIM_VICON_TMASK": 1,  # Send POSITION_ESTIMATE
+            "EK3_SRC1_YAW": 6, # Tell EKF to use Vicon for yaw
+        })
+        self.reboot_sitl()
+
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('STABILIZE')
+        # Look east
+        self.set_rc(Joystick.Yaw, 1600)
+        self.wait_heading(90)
+        self.set_rc(Joystick.Yaw, 1500)
+        self.wait_yaw_speed(0, minimum_duration=1)
+
+        prev_yaw_deg = self.get_heading()
+        # Change to manual to prevent the vehicle from trying to correct yaw
+        self.change_mode('MANUAL')
+        self.set_parameters({
+            'EK3_GYRO_P_NSE': 1.0, # Increased gyro noise makes EKF more sensitive to Vicon yaw
+        })
+        self.set_parameter('SIM_VICON_YAWERR', yaw_offset_deg)
+        self.wait_heading(prev_yaw_deg + yaw_offset_deg, timeout=120)
+        self.set_parameter('SIM_VICON_YAWERR', 0)
+        self.wait_heading(prev_yaw_deg, timeout=120)
+
+        self.disarm_vehicle()
+        self.progress("VisualOdom for Yaw OK")
 
     def _MAV_CMD_CONDITION_YAW(self, run_cmd):
         self.arm_vehicle()
@@ -912,7 +980,7 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
 
         # This should set the EKF origin, write an ORGN msg to df and a GPS_GLOBAL_ORIGIN msg to MAVLink
         self.mav.mav.set_gps_global_origin_send(1, int(47.607584 * 1e7), int(-122.343911 * 1e7), 0)
-        self.delay_sim_time(1)
+        self.delay_sim_time(2)
 
         if not self.current_onboard_log_contains_message('ORGN'):
             raise NotAchievedException("Did not find expected ORGN message")
@@ -927,15 +995,15 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.reboot_sitl()
 
     def BackupOrigin(self):
-        """Test ORIGIN_LAT and ORIGIN_LON parameters"""
+        """Test AHRS_ORIGIN_LAT and AHRS_ORIGIN_LON parameters"""
 
         self.context_push()
         self.set_parameters({
-            'GPS1_TYPE': 0,              # Disable GPS
+            'GPS1_TYPE': 0,             # Disable GPS
             'EK3_SRC1_POSXY': 0,        # Make sure EK3_SRC parameters do not refer to GPS
             'EK3_SRC1_VELXY': 0,        # Make sure EK3_SRC parameters do not refer to GPS
-            'ORIGIN_LAT': 47.607584,
-            'ORIGIN_LON': -122.343911,
+            'AHRS_ORIGIN_LAT': 47.607584,
+            'AHRS_ORIGIN_LON': -122.343911,
         })
         self.reboot_sitl()
         self.context_collect('STATUSTEXT')
@@ -943,18 +1011,12 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         # Wait for the EKF to be happy in constant position mode
         self.wait_ready_to_arm_const_pos()
 
-        if self.current_onboard_log_contains_message('ORGN'):
-            raise NotAchievedException("Found unexpected ORGN message")
+        self.wait_statustext('AHRS: using recorded origin', check_context=True)
 
-        # This should set the origin and write a record to ORGN
-        self.arm_vehicle()
-
-        self.wait_statustext('Using backup location', check_context=True)
-
+        # check that origin has been logged
         if not self.current_onboard_log_contains_message('ORGN'):
             raise NotAchievedException("Did not find expected ORGN message")
 
-        self.disarm_vehicle()
         self.context_pop()
 
     def assert_mag_fusion_selection(self, expect_sel):
@@ -1254,6 +1316,41 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.disarm_vehicle()
         self.context_pop()
 
+    def UTMGlobalPositionWaypoint(self):
+        '''test UTM_GLOBAL_POSITION waypoint fields in AUTO'''
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 50, 0, -10),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        # seq 0 = home, seq 1 = WAYPOINT (50m north, 10m depth)
+        wp = self.assert_fetch_mission_item_int(1, 1, 1, mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('AUTO')
+        self.send_cmd(mavutil.mavlink.MAV_CMD_MISSION_START)
+        self.wait_current_waypoint(1, timeout=30)
+
+        # epsilon=1 allows for 1-unit (0.11m) rounding from AP's internal coordinate conversion
+        m = self.assert_received_message_field_values("UTM_GLOBAL_POSITION", {
+            "next_lat": wp.x,
+            "next_lon": wp.y,
+        }, poll=True, epsilon=1)
+        if not (m.flags & mavutil.mavlink.UTM_DATA_AVAIL_FLAGS_NEXT_WAYPOINT_AVAILABLE):
+            raise NotAchievedException(f"AUTO: NEXT_WAYPOINT_AVAILABLE not set (flags=0x{m.flags:x})")
+        self.disarm_vehicle(force=True)
+
+    def UTMGlobalPosition(self):
+        '''test UTM_GLOBAL_POSITION message sending'''
+        self.wait_ready_to_arm()
+        m = self.assert_received_message_field_values("UTM_GLOBAL_POSITION", {
+            "flight_state": mavutil.mavlink.UTM_FLIGHT_STATE_UNKNOWN,
+        }, poll=True)
+        if all(b == 0 for b in m.uas_id):
+            raise NotAchievedException("UAS ID is all zeros")
+        if m.flags & mavutil.mavlink.UTM_DATA_AVAIL_FLAGS_UAS_ID_AVAILABLE == 0:
+            raise NotAchievedException("UAS_ID_AVAILABLE flag not set")
+
     def tests(self):
         '''return list of all tests'''
         ret = super(AutoTestSub, self).tests()
@@ -1293,6 +1390,10 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
             self.SHT3X,
             self.SurfaceSensorless,
             self.GPSForYaw,
+            self.WaterDepth,
+            self.VisoForYaw,
+            self.UTMGlobalPosition,
+            self.UTMGlobalPositionWaypoint,
         ])
 
         return ret

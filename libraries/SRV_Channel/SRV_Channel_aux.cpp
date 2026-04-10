@@ -354,7 +354,8 @@ void SRV_Channels::set_output_pwm(SRV_Channel::Function function, uint16_t value
     if (!function_assigned(function)) {
         return;
     }
-    for (uint8_t i = 0; i < NUM_SERVO_CHANNELS; i++) {
+    // channels is a pointer assigned from obj_channels:
+    for (uint8_t i = 0; i < ARRAY_SIZE(obj_channels); i++) {
         if (channels[i].function == function) {
             channels[i].set_output_pwm(value);
             channels[i].output_ch();
@@ -812,10 +813,9 @@ void SRV_Channels::set_slew_rate(SRV_Channel::Function function, float slew_rate
         }
     }
 
-    if (!is_positive(max_change)) {
-        // no point in adding a disabled slew limit
-        return;
-    }
+    // The slew limit is still allocated even if the slew rate is 0 for disabled.
+    // This means that if the slew limit is changed at some point in the future we still have
+    // a valid last output to slew from.
 
     // add new item
     slew_list *new_slew = NEW_NOTHROW slew_list(function);

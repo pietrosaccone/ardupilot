@@ -1,12 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 decode an stm32 ICSR register value
 
 AP_FLAKE8_CLEAN
 '''
 
-import sys
 import optparse
+import sys
 
 
 class DecodeICSR(object):

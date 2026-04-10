@@ -66,7 +66,7 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
     FAST_TASK(stabilize),
     FAST_TASK(set_servos),
     SCHED_TASK(read_radio,             50,    100,   6),
-    SCHED_TASK(check_short_failsafe,   50,    100,   9),
+    SCHED_TASK(check_short_rc_failsafe,   50,    100,   9),
     SCHED_TASK(update_speed_height,    50,    200,  12),
     SCHED_TASK(update_throttle_hover, 100,     90,  24),
     SCHED_TASK_CLASS(RC_Channels,     (RC_Channels*)&plane.g2.rc_channels, read_mode_switch,           7,    100, 27),
@@ -99,9 +99,6 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
     SCHED_TASK(one_second_loop,         1,    400,  90),
     SCHED_TASK(three_hz_loop,           3,     75,  93),
     SCHED_TASK(check_long_failsafe,     3,    400,  96),
-#if AP_RPM_ENABLED
-    SCHED_TASK_CLASS(AP_RPM,           &plane.rpm_sensor,     update,     10, 100,  99),
-#endif
 #if AP_AIRSPEED_AUTOCAL_ENABLE
     SCHED_TASK(airspeed_ratio_update,   1,    100,  102),
 #endif // AP_AIRSPEED_AUTOCAL_ENABLE
@@ -271,16 +268,31 @@ void Plane::update_compass(void)
  */
 void Plane::update_logging10(void)
 {
-    bool log_faster = (should_log(MASK_LOG_ATTITUDE_FULLRATE) || should_log(MASK_LOG_ATTITUDE_FAST));
-    if (should_log(MASK_LOG_ATTITUDE_MED) && !log_faster) {
+    const bool attitude_med = should_log(MASK_LOG_ATTITUDE_MED);
+    const bool attitude_faster = should_log(MASK_LOG_ATTITUDE_FULLRATE) || should_log(MASK_LOG_ATTITUDE_FAST);
+
+    // Log attitude only if no faster logging is selected
+    if (attitude_med && !attitude_faster) {
         Log_Write_Attitude();
-        ahrs.Write_AOA_SSA();
-    } else if (log_faster) {
+        AP::ahrs().Log_Write();
+    }
+
+    // If any attitude logging is enabled log AOA and SSA
+    if (attitude_med || attitude_faster) {
         ahrs.Write_AOA_SSA();
     }
+
 #if HAL_MOUNT_ENABLED
     if (should_log(MASK_LOG_CAMERA)) {
         camera_mount.write_log();
+    }
+#endif
+#if AP_RANGEFINDER_ENABLED
+    if (should_log(MASK_LOG_NTUN)) {
+        if (rangefinder.has_orientation(rangefinder_orientation()) &&
+            (g.rangefinder_landing.get() > 0)) {
+            Log_Write_RFNS();
+        }
     }
 #endif
 }
@@ -290,11 +302,17 @@ void Plane::update_logging10(void)
  */
 void Plane::update_logging25(void)
 {
-    // MASK_LOG_ATTITUDE_FULLRATE logs at 400Hz, MASK_LOG_ATTITUDE_FAST at 25Hz, MASK_LOG_ATTIUDE_MED logs at 10Hz
-    // highest rate selected wins
-    bool log_faster = should_log(MASK_LOG_ATTITUDE_FULLRATE);
-    if (should_log(MASK_LOG_ATTITUDE_FAST) && !log_faster) {
+    const bool attitude_fast = should_log(MASK_LOG_ATTITUDE_FAST);
+    const bool attitude_full_rate = should_log(MASK_LOG_ATTITUDE_FULLRATE);
+
+    // Log at fast rate if fast logging is the fastest enabled
+    if (attitude_fast && !attitude_full_rate) {
         Log_Write_Attitude();
+    }
+
+    // Log AHRS at fast rate if either fast or full rate is selected
+    if (attitude_fast || attitude_full_rate) {
+        AP::ahrs().Log_Write();
     }
 
     if (should_log(MASK_LOG_CTUN)) {
@@ -319,6 +337,10 @@ void Plane::update_logging25(void)
 
     if (should_log(MASK_LOG_IMU))
         AP::ins().Write_Vibration();
+
+#if AP_PLANE_BLACKBOX_LOGGING
+    Log_Write_Blackbox();
+#endif
 }
 #endif  // HAL_LOGGING_ENABLED
 
@@ -374,19 +396,12 @@ void Plane::one_second_loop()
     // changed. Update every 5s at most
     if (!arming.is_armed() &&
         gps.last_message_time_ms() - last_home_update_ms > 5000 &&
-        gps.status() >= AP_GPS::GPS_OK_FIX_3D) {
+        gps.status() >= AP_GPS_FixType::FIX_3D) {
             last_home_update_ms = gps.last_message_time_ms();
             update_home();
             
             // reset the landing altitude correction
             landing.alt_offset = 0;
-    }
-
-    // this ensures G_Dt is correct, catching startup issues with constructors
-    // calling the scheduler methods
-    if (!is_equal(1.0f/scheduler.get_loop_rate_hz(), scheduler.get_loop_period_s()) ||
-        !is_equal(G_Dt, scheduler.get_loop_period_s())) {
-        INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
     }
 
     const float loop_rate = AP::scheduler().get_filtered_loop_rate_hz();
@@ -417,7 +432,7 @@ void Plane::airspeed_ratio_update(void)
         !ahrs.get_fly_forward() ||
         !is_flying() ||
         !airspeed.enabled() ||
-        gps.status() < AP_GPS::GPS_OK_FIX_3D ||
+        gps.status() < AP_GPS_FixType::FIX_3D ||
         gps.ground_speed() < 4) {
         // don't calibrate when not moving
         return;        
@@ -457,7 +472,7 @@ void Plane::update_GPS_50Hz(void)
 void Plane::update_GPS_10Hz(void)
 {
     static uint32_t last_gps_msg_ms;
-    if (gps.last_message_time_ms() != last_gps_msg_ms && gps.status() >= AP_GPS::GPS_OK_FIX_3D) {
+    if (gps.last_message_time_ms() != last_gps_msg_ms && gps.status() >= AP_GPS_FixType::FIX_3D) {
         last_gps_msg_ms = gps.last_message_time_ms();
 
         if (ground_start_count > 1) {
@@ -482,7 +497,7 @@ void Plane::update_GPS_10Hz(void)
 
         // update wind estimate
         ahrs.estimate_wind();
-    } else if (gps.status() < AP_GPS::GPS_OK_FIX_3D && ground_start_count != 0) {
+    } else if (gps.status() < AP_GPS_FixType::FIX_3D && ground_start_count != 0) {
         // lost 3D fix, start again
         ground_start_count = 5;
     }
@@ -599,7 +614,7 @@ void Plane::update_alt()
     Vector3f vel;
     if (ahrs.get_velocity_NED(vel)) {
         sink_rate = vel.z;
-    } else if (gps.status() >= AP_GPS::GPS_OK_FIX_3D && gps.have_vertical_velocity()) {
+    } else if (gps.status() >= AP_GPS_FixType::FIX_3D && gps.have_vertical_velocity()) {
         sink_rate = gps.velocity().z;
     } else {
         sink_rate = -barometer.get_climb_rate();        
@@ -843,7 +858,7 @@ bool Plane::get_wp_distance_m(float &distance) const
     }
 #if HAL_QUADPLANE_ENABLED
     if (quadplane.in_vtol_mode()) {
-        distance = quadplane.using_wp_nav() ? quadplane.wp_nav->get_wp_distance_to_destination_cm() * 0.01 : 0;
+        distance = quadplane.using_wp_nav() ? quadplane.wp_nav->get_wp_distance_to_destination_m() : 0;
         return true;
     }
 #endif
@@ -875,11 +890,11 @@ bool Plane::get_wp_crosstrack_error_m(float &xtrack_error) const
     }
 #if HAL_QUADPLANE_ENABLED
     if (quadplane.in_vtol_mode()) {
-        xtrack_error = quadplane.using_wp_nav() ? quadplane.wp_nav->crosstrack_error() : 0;
+        xtrack_error = quadplane.using_wp_nav() ? quadplane.wp_nav->crosstrack_error_m() : 0;
         return true;
     }
 #endif
-    xtrack_error = nav_controller->crosstrack_error();
+    xtrack_error = nav_controller->crosstrack_error_m();
     return true;
 }
 
@@ -888,7 +903,7 @@ bool Plane::get_wp_crosstrack_error_m(float &xtrack_error) const
 bool Plane::set_target_location(const Location &target_loc)
 {
     Location loc{target_loc};
-    fix_terrain_WP(loc, __LINE__);
+    fix_terrain_WP(loc, __AP_LINE__);
 
     if (plane.control_mode != &plane.mode_guided) {
         // only accept position updates when in GUIDED mode
@@ -944,7 +959,7 @@ bool Plane::update_target_location(const Location &old_loc, const Location &new_
     }
     next_WP_loc = new_loc;
 
-    fix_terrain_WP(next_WP_loc, __LINE__);
+    fix_terrain_WP(next_WP_loc, __AP_LINE__);
 
 #if HAL_QUADPLANE_ENABLED
     if (control_mode == &mode_qland || control_mode == &mode_qloiter) {
@@ -956,11 +971,11 @@ bool Plane::update_target_location(const Location &old_loc, const Location &new_
 }
 
 // allow for velocity matching in VTOL
-bool Plane::set_velocity_match(const Vector2f &velocity)
+bool Plane::set_velocity_match(const Vector2f &velocity_ne_ms)
 {
 #if HAL_QUADPLANE_ENABLED
     if (quadplane.in_vtol_mode() || quadplane.in_vtol_land_sequence()) {
-        quadplane.poscontrol.velocity_match = velocity;
+        quadplane.poscontrol.velocity_match_ms = velocity_ne_ms;
         quadplane.poscontrol.last_velocity_match_ms = AP_HAL::millis();
         return true;
     }
@@ -969,12 +984,12 @@ bool Plane::set_velocity_match(const Vector2f &velocity)
 }
 
 // allow for override of land descent rate
-bool Plane::set_land_descent_rate(float descent_rate)
+bool Plane::set_land_descent_rate(float descent_rate_ms)
 {
 #if HAL_QUADPLANE_ENABLED
     if (quadplane.in_vtol_land_descent() ||
         control_mode == &mode_qland) {
-        quadplane.poscontrol.override_descent_rate = descent_rate;
+        quadplane.poscontrol.override_descent_rate_ms = descent_rate_ms;
         quadplane.poscontrol.last_override_descent_ms = AP_HAL::millis();
         return true;
     }
@@ -1016,8 +1031,8 @@ bool Plane::is_taking_off() const
 }
 
 #if HAL_QUADPLANE_ENABLED
-bool Plane::start_takeoff(const float alt) {
-    return plane.quadplane.available() && quadplane.do_user_takeoff(alt);
+bool Plane::start_takeoff(const float alt_m) {
+    return plane.quadplane.available() && quadplane.do_user_takeoff(alt_m);
 }
 #endif
 

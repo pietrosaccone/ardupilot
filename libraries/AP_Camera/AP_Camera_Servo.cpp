@@ -9,6 +9,9 @@ extern const AP_HAL::HAL& hal;
 // initialize the AP_Camera_Servo driver
 void AP_Camera_Servo::init()
 {
+    // call parent init to set default camera info (flags, focal length, etc.)
+    AP_Camera_Backend::init();
+
     // set the zoom and focus to the trim point
     SRV_Channels::set_output_scaled(SRV_Channel::k_cam_zoom, 500);
     SRV_Channels::set_output_scaled(SRV_Channel::k_cam_focus, 500);
@@ -115,6 +118,17 @@ void AP_Camera_Servo::configure(float shooting_mode, float shutter_speed, float 
     if (shooting_mode > 0) {
         SRV_Channels::set_output_pwm(SRV_Channel::k_cam_focus, (uint16_t)shooting_mode);
     }
+}
+
+// send camera settings message to GCS
+void AP_Camera_Servo::send_camera_settings(mavlink_channel_t chan) const
+{
+    mavlink_msg_camera_settings_send(
+        chan,
+        AP_HAL::millis(),   // time_boot_ms
+        CAMERA_MODE_IMAGE, // camera mode (0:image, 1:video, 2:image survey)
+        SRV_Channels::get_output_scaled(SRV_Channel::k_cam_zoom) / 10.0f,     // zoomLevel float, percentage from 0 to 100, 0 if unassigned
+        SRV_Channels::get_output_scaled(SRV_Channel::k_cam_focus) / 10.0f);   // focusLevel float, percentage from 0 to 100, 0 if unassigned
 }
 
 #endif // AP_CAMERA_SERVO_ENABLED

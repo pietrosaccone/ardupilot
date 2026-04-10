@@ -16,9 +16,7 @@ enum tuning_func {
     TUNING_RATE_ROLL_PITCH_KI =          5, // body frame roll/pitch rate controller's I term
     TUNING_YAW_RATE_KP =                 6, // body frame yaw rate controller's P term
     TUNING_THROTTLE_RATE_KP =            7, // throttle rate controller's P term (desired rate to acceleration or motor output)
-    TUNING_WP_SPEED =                   10, // maximum speed to next way point (0 to 10m/s)
     TUNING_LOITER_POSITION_KP =         12, // loiter distance controller's P term (position error to speed)
-    TUNING_HELI_EXTERNAL_GYRO =         13, // TradHeli specific external tail gyro gain
     TUNING_ALTITUDE_HOLD_KP =           14, // altitude hold controller's P term (alt error to desired rate)
     TUNING_RATE_ROLL_PITCH_KD =         21, // body frame roll/pitch rate controller's D term
     TUNING_VEL_XY_KP =                  22, // loiter rate controller's P term (speed error to tilt angle)
@@ -53,6 +51,7 @@ enum tuning_func {
     TUNING_SYSTEM_ID_MAGNITUDE =        58, // magnitude of the system ID signal
     TUNING_POS_CONTROL_ANGLE_MAX =      59, // position controller maximum angle
     TUNING_LOITER_MAX_XY_SPEED =        60, // maximum loiter horizontal speed
+    TUNING_WP_SPEED_MS =                61, // maximum speed to next waypoint in m/s
 };
 
 // Yaw behaviours during missions - possible values for WP_YAW_BEHAVIOR parameter
@@ -124,16 +123,6 @@ enum LoggingParameters {
 #define FS_THR_ENABLED_ALWAYS_SMARTRTL_OR_LAND     5
 #define FS_THR_ENABLED_AUTO_RTL_OR_RTL             6
 #define FS_THR_ENABLED_BRAKE_OR_LAND               7
-
-// GCS failsafe definitions (FS_GCS_ENABLE parameter)
-#define FS_GCS_DISABLED                        0
-#define FS_GCS_ENABLED_ALWAYS_RTL              1
-#define FS_GCS_ENABLED_CONTINUE_MISSION        2    // Removed in 4.0+, now use fs_options
-#define FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_RTL  3
-#define FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_LAND 4
-#define FS_GCS_ENABLED_ALWAYS_LAND             5
-#define FS_GCS_ENABLED_AUTO_RTL_OR_RTL         6
-#define FS_GCS_ENABLED_BRAKE_OR_LAND           7
 
 // EKF failsafe definitions (FS_EKF_ACTION parameter)
 #define FS_EKF_ACTION_REPORT_ONLY           0

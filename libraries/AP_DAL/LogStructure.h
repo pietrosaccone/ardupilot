@@ -38,7 +38,8 @@
     LOG_RSLL_MSG, \
     LOG_REVH_MSG, \
     LOG_RWOH_MSG, \
-    LOG_RBOH_MSG
+    LOG_RBOH_MSG, \
+    LOG_RTER_MSG
 
 // @LoggerMessage: RFRH
 // @Description: Replay FRame Header
@@ -403,10 +404,10 @@ struct log_RMGI {
 
 // @LoggerMessage: RBCH
 // @Description: Replay Data Beacon Header
-// @Field: PX: zero, unused
-// @Field: PY: zero, unused
-// @Field: PZ: zero, unused
-// @Field: AE: zero, unused
+// @Field: PX: beacon system estimated vehicle position, North
+// @Field: PY: beacon system estimated vehicle position, East
+// @Field: PZ: beacon system estimated vehicle position, Down
+// @Field: AE: beacon system estimated vehicle position accuracy
 // @Field: OLat: origin latitude
 // @Field: OLng: origin longitude
 // @Field: OAlt: origin altitude
@@ -565,10 +566,10 @@ struct log_RWOH {
 // @Field: DAZ: delta-angle-Z
 // @Field: DT: delta-time
 // @Field: TS: data timestamp
-// @Field: OX: zero, unused
-// @Field: OY: zero, unused
-// @Field: OZ: zero, unused
-// @Field: D: zero, unused
+// @Field: OX: pos-offset-X
+// @Field: OY: pos-offset-Y
+// @Field: OZ: pos-offset-Z
+// @Field: D: delay in body odometry data
 struct log_RBOH {
     float quality;
     Vector3f delPos;
@@ -577,6 +578,14 @@ struct log_RBOH {
     uint32_t timeStamp_ms;
     Vector3f posOffset;
     uint16_t delay_ms;
+    uint8_t _end;
+};
+
+// @LoggerMessage: RTER
+// @Description: Replay Terrain SRTM Altitude
+// @Field: Alt: altitude above origin in meters
+struct log_RTER {
+    float alt_m;
     uint8_t _end;
 };
 
@@ -646,4 +655,6 @@ struct log_RBOH {
     { LOG_RWOH_MSG, RLOG_SIZE(RWOH),                                   \
       "RWOH", "ffIffff", "DA,DT,TS,PX,PY,PZ,R", "-------", "-------" }, \
     { LOG_RBOH_MSG, RLOG_SIZE(RBOH),                                   \
-      "RBOH", "ffffffffIfffH", "Q,DPX,DPY,DPZ,DAX,DAY,DAZ,DT,TS,OX,OY,OZ,D", "-------------", "-------------" },
+      "RBOH", "ffffffffIfffH", "Q,DPX,DPY,DPZ,DAX,DAY,DAZ,DT,TS,OX,OY,OZ,D", "-------------", "-------------" }, \
+    { LOG_RTER_MSG, RLOG_SIZE(RTER),                                   \
+      "RTER", "f", "Alt", "m", "0" },

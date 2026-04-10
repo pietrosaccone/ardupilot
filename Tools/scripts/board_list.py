@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
+import fnmatch
 import os
 import re
-import fnmatch
+
 from collections.abc import Collection
 
 '''
@@ -16,7 +17,8 @@ class Board(object):
     def __init__(self, name):
         self.name = name
         self.is_ap_periph = False
-        self.toolchain = 'arm-eabi-none'  # FIXME: try to remove this?
+        self.toolchain = 'arm-none-eabi'  # FIXME: try to remove this?
+        self.hal = None  # filled in below
         self.autobuild_targets = [
             'Tracker',
             'Blimp',
@@ -65,17 +67,13 @@ class BoardList(object):
         )
 
         self.hwdef_dir = []
-        for haldir in 'AP_HAL_ChibiOS', 'AP_HAL_Linux':
+        for haldir in 'AP_HAL_ChibiOS', 'AP_HAL_Linux', 'AP_HAL_ESP32', 'AP_HAL_SITL':
             self.hwdef_dir.append(os.path.join(realpath, haldir, "hwdef"))
 
     def __init__(self):
         self.set_hwdef_dir()
 
-        # no hwdefs for Linux boards - yet?
-        self.boards = [
-            Board("SITL_x86_64_linux_gnu"),
-            Board("SITL_arm_linux_gnueabihf"),
-        ]
+        self.boards = []
 
         for hwdef_dir in self.hwdef_dir:
             self.add_hwdefs_from_hwdef_dir(hwdef_dir)
@@ -131,13 +129,28 @@ class BoardList(object):
                     board.toolchain = 'arm-linux-gnueabihf'
                 elif "ChibiOS" in hwdef_dir:
                     board.toolchain = 'arm-none-eabi'
+                elif "ESP32" in hwdef_dir:
+                    board.toolchain = 'xtensa-esp32-elf'
+                elif "SITL" in hwdef_dir:
+                    board.toolchain = None
                 else:
-                    raise ValueError(f"Unable to determine toolchain for {adir}")
+                    raise ValueError(f"Unable to determine toolchain for {hwdef_dir}")
+
+            if "Linux" in hwdef_dir:
+                board.hal = "Linux"
+            elif "ChibiOS" in hwdef_dir:
+                board.hal = "ChibiOS"
+            elif "ESP32" in hwdef_dir:
+                board.hal = "ESP32"
+            elif "SITL" in hwdef_dir:
+                board.hal = "SITL"
+            else:
+                raise ValueError(f"Unable to determine HAL for {hwdef_dir}")
 
     def read_hwdef(self, filepath):
-        fh = open(filepath)
         ret = []
-        text = fh.readlines()
+        with open(filepath) as in_file:
+            text = in_file.readlines()
         for line in text:
             m = re.match(r"^\s*include\s+(.+)\s*$", line)
             if m is not None:

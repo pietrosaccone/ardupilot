@@ -57,7 +57,6 @@ public:
 
 private:
     void _parse_command_line(int argc, char * const argv[]);
-    void _set_param_default(const char *parm);
     void _usage(void);
     void _sitl_setup();
     void _setup_timer(void);
@@ -105,8 +104,6 @@ private:
     VectorN<readings_wind,wind_buffer_length> buffer_wind;
     uint32_t time_delta_wind;
     uint32_t delayed_time_wind;
-    uint32_t wind_start_delay_micros;
-    uint32_t last_wind_update_us;
 
     // returns a voltage between 0V to 5V which should appear as the
     // voltage from the sensor
